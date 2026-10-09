@@ -308,6 +308,72 @@
             border-color: var(--primary-color);
         }
 
+        .result-modal-content {
+            width: min(420px, calc(100vw - 32px));
+            padding: 24px;
+        }
+
+        .result-number-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .result-option-btn {
+            min-height: 44px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: #f8fafc;
+            color: var(--text-main);
+            cursor: pointer;
+            font: inherit;
+            font-weight: 600;
+        }
+
+        .result-option-btn:hover,
+        .result-option-btn.selected {
+            border-color: var(--primary-color);
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .result-shortcut-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 8px;
+            margin: 16px 0;
+        }
+
+        .result-stepper {
+            display: grid;
+            grid-template-columns: 24px minmax(0, 1fr) 24px;
+            gap: 3px;
+            align-items: center;
+        }
+
+        .result-stepper-control {
+            min-width: 24px;
+            min-height: 34px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: #f8fafc;
+            color: var(--text-main);
+            cursor: pointer;
+            font: inherit;
+            font-size: 0.7rem;
+        }
+
+        .result-stepper-control:disabled,
+        .result-stepper .result-option-btn:disabled {
+            cursor: not-allowed;
+            opacity: 0.4;
+        }
+
+        .result-made-btn {
+            width: 100%;
+        }
+
         .modal-actions {
             display: flex;
             justify-content: flex-end;
@@ -530,7 +596,7 @@
                             </th>
                             <th style="width: 120px;">Doubling<div class="col-resizer"></div>
                             </th>
-                            <th style="width: 100px;">Tricks<div class="col-resizer"></div>
+                            <th style="width: 120px;">Result<div class="col-resizer"></div>
                             </th>
                             <th style="width: 80px;">Status<div class="col-resizer"></div>
                             </th>
@@ -567,6 +633,31 @@
             <div class="modal-actions">
                 <button class="btn-cancel" onclick="selectContract('')" style="color: #dc2626; border-color: #fecaca; background: #fef2f2;">Clear</button>
                 <button class="btn-cancel" onclick="closeContractMatrix()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="resultModal" onclick="if(event.target === this) closeResultPicker()">
+        <div class="modal-content result-modal-content" role="dialog" aria-modal="true" aria-labelledby="resultModalTitle">
+            <div class="modal-header">
+                <h2 id="resultModalTitle">Enter Result</h2>
+            </div>
+            <div class="result-number-grid" id="resultNumberGrid"></div>
+            <div class="result-shortcut-row">
+                <div class="result-stepper">
+                    <button class="result-stepper-control" type="button" aria-label="Increase undertricks" onclick="adjustRelativeResult('under', 1)">&#9650;</button>
+                    <button class="result-option-btn" id="undertrickResultButton" type="button" onclick="selectRelativeResult('under')">-1</button>
+                    <button class="result-stepper-control" type="button" aria-label="Decrease undertricks" onclick="adjustRelativeResult('under', -1)">&#9660;</button>
+                </div>
+                <button class="result-option-btn result-made-btn" id="madeResultButton" type="button" onclick="selectResult('made')">Made</button>
+                <div class="result-stepper">
+                    <button class="result-stepper-control" type="button" aria-label="Increase overtricks" onclick="adjustRelativeResult('over', 1)">&#9650;</button>
+                    <button class="result-option-btn" id="overtrickResultButton" type="button" onclick="selectRelativeResult('over')">+1</button>
+                    <button class="result-stepper-control" type="button" aria-label="Decrease overtricks" onclick="adjustRelativeResult('over', -1)">&#9660;</button>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-cancel" type="button" onclick="closeResultPicker()">Cancel</button>
             </div>
         </div>
     </div>
@@ -638,7 +729,7 @@
                     contract: "",
                     by: "",
                     doubling: "none",
-                    result: 0,
+                    result: "",
                     team: "-",
                     vulnStatus: "no",
                     score: 0,
@@ -686,9 +777,9 @@
                         </select>
                     </td>
                     <td class="editable-cell">
-                        <input type="number" min="0" max="13" value="${entry.result}" 
-                            data-index="${index}" data-field="result" 
-                            onchange="handleUpdate(${index}, 'result', parseInt(this.value) || 0)">
+                        <input type="text" placeholder="Select result" title="Choose tricks taken or a result relative to the contract" value="${entry.result}" readonly
+                            data-index="${index}" data-field="result"
+                            onclick="openResultPicker(${index})" style="cursor: pointer;">
                     </td>
                     <td><span class="badge ${entry.vulnStatus === 'yes' ? 'badge-vuln' : 'badge-safe'}">${entry.vulnStatus === 'yes' ? 'V' : '-'}</span></td>
                     <td class="text-right font-mono">${entry.score !== 0 ? entry.score : '-'}</td>
@@ -731,7 +822,8 @@
                 else if (entry.vulnerable === 'NS' && entry.team === 'NS') isVuln = true;
                 entry.vulnStatus = isVuln ? 'yes' : 'no';
 
-                entry.score = computeBridgeScore(entry.contract, entry.result, entry.doubling, entry.vulnStatus === 'yes');
+                const tricksTaken = getTricksTaken(entry.contract, entry.result);
+                entry.score = tricksTaken === null ? 0 : computeBridgeScore(entry.contract, tricksTaken, entry.doubling, entry.vulnStatus === 'yes');
 
                 if (entry.team === 'NS') entry.nsScore = entry.score;
                 else if (entry.team === 'EW') entry.nsScore = -entry.score;
@@ -740,6 +832,29 @@
                 runningSum += entry.nsScore;
                 entry.cumulative = runningSum;
             });
+        }
+
+        function getTricksTaken(contract, result) {
+            const text = String(result ?? '').trim().toLowerCase();
+            if (!text) return null;
+
+            const level = parseInt(contract, 10);
+            const contractTricks = Number.isNaN(level) ? null : 6 + level;
+            let tricks;
+
+            if (/^(made|=)$/.test(text)) {
+                if (contractTricks === null) return null;
+                tricks = contractTricks;
+            } else if (/^[+-]\d+$/.test(text)) {
+                if (contractTricks === null) return null;
+                tricks = contractTricks + parseInt(text, 10);
+            } else if (/^\d+$/.test(text)) {
+                tricks = parseInt(text, 10);
+            } else {
+                return null;
+            }
+
+            return tricks >= 0 && tricks <= 13 ? tricks : null;
         }
 
         function computeBridgeScore(bid, tricks, doubling, isVuln) {
@@ -932,13 +1047,92 @@
                     e.preventDefault();
                     pendingFocusTarget = { index: nextIdx, field: EDITABLE_FIELDS[nextFieldIdx] };
 
-                    const val = (field === 'result') ? (parseInt(e.target.value) || 0) : e.target.value;
+                    const val = e.target.value;
                     handleUpdate(index, field, val);
                 }
             }
         });
 
         let currentEditingIndex = null;
+
+        let currentResultEditingIndex = null;
+        let undertrickMagnitude = 1;
+        let overtrickMagnitude = 1;
+        let maxUndertricks = 13;
+        let maxOvertricks = 13;
+
+        function generateResultGrid() {
+            const grid = document.getElementById('resultNumberGrid');
+            grid.innerHTML = Array.from({ length: 14 }, (_, tricks) =>
+                `<button class="result-option-btn" type="button" onclick="selectResult('${tricks}')">${tricks}</button>`
+            ).join('');
+        }
+
+        function openResultPicker(index) {
+            currentResultEditingIndex = index;
+            const entry = entries[index];
+            const selectedResult = String(entry.result ?? '').trim();
+            const level = parseInt(entry.contract, 10);
+            const contractTricks = Number.isNaN(level) ? null : 6 + level;
+            maxUndertricks = contractTricks === null ? 13 : contractTricks;
+            maxOvertricks = contractTricks === null ? 13 : 13 - contractTricks;
+            undertrickMagnitude = selectedResult.match(/^-(\d+)$/) ? parseInt(selectedResult.slice(1), 10) : 1;
+            overtrickMagnitude = selectedResult.match(/^\+(\d+)$/) ? parseInt(selectedResult.slice(1), 10) : 1;
+            undertrickMagnitude = Math.max(1, Math.min(undertrickMagnitude, maxUndertricks));
+            overtrickMagnitude = Math.max(1, Math.min(overtrickMagnitude, Math.max(1, maxOvertricks)));
+
+            document.querySelectorAll('#resultNumberGrid .result-option-btn').forEach(button => {
+                button.classList.toggle('selected', button.textContent === selectedResult);
+            });
+            document.getElementById('madeResultButton').classList.toggle('selected', /^(made|=)$/i.test(selectedResult));
+            updateRelativeResultButtons(selectedResult);
+            document.getElementById('resultModal').classList.add('active');
+            document.querySelector('#resultNumberGrid button').focus();
+        }
+
+        function updateRelativeResultButtons(selectedResult = '') {
+            const underButton = document.getElementById('undertrickResultButton');
+            const overButton = document.getElementById('overtrickResultButton');
+            underButton.textContent = `-${undertrickMagnitude}`;
+            overButton.textContent = `+${overtrickMagnitude}`;
+            underButton.disabled = maxUndertricks < 1;
+            overButton.disabled = maxOvertricks < 1;
+            underButton.classList.toggle('selected', selectedResult === `-${undertrickMagnitude}`);
+            overButton.classList.toggle('selected', selectedResult === `+${overtrickMagnitude}`);
+
+            const stepperControls = document.querySelectorAll('.result-stepper-control');
+            stepperControls[0].disabled = undertrickMagnitude >= maxUndertricks;
+            stepperControls[1].disabled = undertrickMagnitude <= 1;
+            stepperControls[2].disabled = overtrickMagnitude >= maxOvertricks;
+            stepperControls[3].disabled = overtrickMagnitude <= 1;
+        }
+
+        function adjustRelativeResult(side, change) {
+            if (side === 'under') {
+                undertrickMagnitude = Math.max(1, Math.min(maxUndertricks, undertrickMagnitude + change));
+            } else {
+                overtrickMagnitude = Math.max(1, Math.min(maxOvertricks, overtrickMagnitude + change));
+            }
+            updateRelativeResultButtons();
+        }
+
+        function selectRelativeResult(side) {
+            const result = side === 'under' ? `-${undertrickMagnitude}` : `+${overtrickMagnitude}`;
+            selectResult(result);
+        }
+
+        function closeResultPicker() {
+            document.getElementById('resultModal').classList.remove('active');
+            currentResultEditingIndex = null;
+        }
+
+        function selectResult(value) {
+            if (currentResultEditingIndex === null) return;
+            const index = currentResultEditingIndex;
+            pendingFocusTarget = { index, field: 'result' };
+            closeResultPicker();
+            handleUpdate(index, 'result', value);
+        }
 
         function generateContractGrid() {
             const grid = document.getElementById('contractGrid');
@@ -1130,14 +1324,13 @@
             };
 
             entries.forEach(entry => {
-                if (!entry.contract || !entry.by || entry.result === 0) return;
+                const tricksMade = getTricksTaken(entry.contract, entry.result);
+                if (!entry.contract || !entry.by || tricksMade === null) return;
 
                 const team = (['N', 'S'].includes(entry.by)) ? 'NS' : 'EW';
                 const level = parseInt(entry.contract[0]);
                 const suit = entry.contract.substring(1);
                 const tricksBid = 6 + level;
-                const tricksMade = entry.result;
-
                 stats[team].total++;
                 stats[team].totalScore += entry.score;
                 if (entry.score > stats[team].maxScore) stats[team].maxScore = entry.score;
@@ -1254,7 +1447,7 @@
                     entry.contract || '',
                     entry.by || '',
                     entry.doubling || 'none',
-                    entry.result || 0
+                    entry.result ?? ''
                 ]);
             });
 
@@ -1292,7 +1485,7 @@
                             entries[index].contract = cols[1].replace(/['"]/g, '').trim();
                             entries[index].by = cols[2].replace(/['"]/g, '').trim();
                             entries[index].doubling = cols[3].replace(/['"]/g, '').trim() || 'none';
-                            entries[index].result = parseInt(cols[4].replace(/['"]/g, '').trim()) || 0;
+                            entries[index].result = cols[4].replace(/['"]/g, '').trim();
                         }
                     }
                 }
@@ -1422,6 +1615,7 @@
         document.addEventListener('DOMContentLoaded', () => {
             init();
             generateContractGrid();
+            generateResultGrid();
             updateBackupStatus();
             setInterval(() => saveAutoBackup(false), 60 * 1000);
         });
