@@ -408,6 +408,56 @@
             border: 1px solid var(--border-color);
         }
 
+        .ai-endpoint-settings {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 8px;
+            align-items: end;
+            margin: 0 0 16px;
+        }
+
+        .ai-endpoint-settings label {
+            grid-column: 1 / -1;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .ai-endpoint-settings input {
+            width: 100%;
+            min-width: 0;
+            min-height: 40px;
+            padding: 8px 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            font: inherit;
+        }
+
+        .ai-analysis-status {
+            min-height: 1.25em;
+            margin: 0 0 12px;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        .ai-coach-analysis {
+            margin-top: 14px;
+            padding-top: 12px;
+            border-top: 1px solid var(--border-color);
+            color: var(--text-main);
+            line-height: 1.5;
+        }
+
+        .ai-coach-analysis h4 {
+            margin-bottom: 6px;
+            font-size: 0.9rem;
+        }
+
+        .ai-coach-analysis ul {
+            margin: 6px 0 8px;
+            padding-left: 20px;
+        }
+
         .team-stats h3 {
             font-size: 1.125rem;
             margin-bottom: 12px;
@@ -687,8 +737,14 @@
         <div class="modal-content" style="width: 700px; max-width: 95vw;">
             <div class="modal-header">
                 <h2>Team Performance Analysis</h2>
-                <p style="color: var(--text-muted); margin-top: 4px;">Qualitative evaluation & strategic coaching feedback</p>
+                <p style="color: var(--text-muted); margin-top: 4px;">AI coaching based on aggregate team results</p>
             </div>
+            <div class="ai-endpoint-settings">
+                <label for="aiWorkerUrl">Cloudflare Worker URL</label>
+                <input id="aiWorkerUrl" type="url" placeholder="https://your-worker.your-subdomain.workers.dev" autocomplete="url">
+                <button class="action-btn" type="button" onclick="saveAIWorkerUrl()">Save URL</button>
+            </div>
+            <p id="aiAnalysisStatus" class="ai-analysis-status" role="status" aria-live="polite"></p>
             <div class="stats-grid" style="grid-template-columns: 1fr; gap: 20px; max-height: 60vh; overflow-y: auto; padding-right: 8px;">
                 <div class="team-perf-card" id="nsPerfContent" style="background: #f8fafc; padding: 20px; border-radius: 12px; border: 1px solid var(--border-color);">
                 </div>
@@ -715,10 +771,12 @@
             "All", "None", "NS", "EW"
         ];
         const EDITABLE_FIELDS = ['contract', 'by', 'doubling', 'result'];
+        const AI_WORKER_URL_KEY = 'bridgePerformanceAIWorkerUrl';
 
         let entries = [];
         let chartInstance = null;
         let pendingFocusTarget = null;
+        let aiAnalysisRequestId = 0;
 
         function init() {
             for (let i = 1; i <= ROWS_COUNT; i++) {
@@ -1194,9 +1252,101 @@
                 return;
             }
 
-            document.getElementById('nsPerfContent').innerHTML = generatePerformanceReport(stats.NS, 'N-S Team', '#3b82f6');
-            document.getElementById('ewPerfContent').innerHTML = generatePerformanceReport(stats.EW, 'E-W Team', '#10b981');
+            document.getElementById('nsPerfContent').innerHTML = `${generatePerformanceReport(stats.NS, 'N-S Team', '#3b82f6')}<section class="ai-coach-analysis" id="nsAiAnalysis"></section>`;
+            document.getElementById('ewPerfContent').innerHTML = `${generatePerformanceReport(stats.EW, 'E-W Team', '#10b981')}<section class="ai-coach-analysis" id="ewAiAnalysis"></section>`;
+            document.getElementById('aiWorkerUrl').value = localStorage.getItem(AI_WORKER_URL_KEY) || '';
             document.getElementById('perfSummaryModal').classList.add('active');
+            requestAIPerformanceAnalysis(stats);
+        }
+
+        function saveAIWorkerUrl() {
+            const input = document.getElementById('aiWorkerUrl');
+            const status = document.getElementById('aiAnalysisStatus');
+            const value = input.value.trim();
+            if (!value) {
+                localStorage.removeItem(AI_WORKER_URL_KEY);
+                status.textContent = 'Worker URL cleared. The rule-based report remains available.';
+                return;
+            }
+
+            try {
+                const url = new URL(value);
+                if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname))) {
+                    throw new Error('Use an HTTPS Worker URL.');
+                }
+                localStorage.setItem(AI_WORKER_URL_KEY, url.toString().replace(/\/$/, ''));
+                status.textContent = 'Worker URL saved. Click Performance Summary again to request fresh analysis.';
+            } catch (error) {
+                status.textContent = error.message || 'Enter a valid Worker URL.';
+            }
+        }
+
+        async function requestAIPerformanceAnalysis(stats) {
+            const workerUrl = localStorage.getItem(AI_WORKER_URL_KEY);
+            const status = document.getElementById('aiAnalysisStatus');
+            const requestId = ++aiAnalysisRequestId;
+            if (!workerUrl) {
+                status.textContent = 'Save your deployed Cloudflare Worker URL above to enable AI analysis.';
+                return;
+            }
+
+            status.textContent = 'Requesting AI analysis for both teams...';
+            document.getElementById('nsAiAnalysis').textContent = 'Analysis in progress...';
+            document.getElementById('ewAiAnalysis').textContent = 'Analysis in progress...';
+
+            try {
+                const response = await fetch(workerUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ teams: { NS: stats.NS, EW: stats.EW } })
+                });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.error || `Worker request failed (${response.status}).`);
+                if (requestId !== aiAnalysisRequestId) return;
+                renderAICoachAnalysis('nsAiAnalysis', result.teams?.NS);
+                renderAICoachAnalysis('ewAiAnalysis', result.teams?.EW);
+                status.textContent = `AI analysis complete${result.model ? ` (${result.model})` : ''}.`;
+            } catch (error) {
+                if (requestId !== aiAnalysisRequestId) return;
+                document.getElementById('nsAiAnalysis').textContent = 'AI analysis is unavailable.';
+                document.getElementById('ewAiAnalysis').textContent = 'AI analysis is unavailable.';
+                status.textContent = `${error.message} The rule-based report is still shown above.`;
+            }
+        }
+
+        function renderAICoachAnalysis(elementId, analysis) {
+            const container = document.getElementById(elementId);
+            if (!analysis || typeof analysis.summary !== 'string') {
+                container.textContent = 'The AI response did not include a valid team analysis.';
+                return;
+            }
+
+            const title = document.createElement('h4');
+            title.textContent = 'AI Coach Analysis';
+            const summary = document.createElement('p');
+            summary.textContent = analysis.summary;
+            container.replaceChildren(title, summary);
+
+            for (const [label, items] of [['Strengths', analysis.strengths], ['Areas to work on', analysis.opportunities]]) {
+                if (!Array.isArray(items) || !items.length) continue;
+                const heading = document.createElement('strong');
+                heading.textContent = label;
+                const list = document.createElement('ul');
+                items.slice(0, 4).forEach(item => {
+                    const listItem = document.createElement('li');
+                    listItem.textContent = String(item);
+                    list.appendChild(listItem);
+                });
+                container.append(heading, list);
+            }
+
+            if (typeof analysis.coachingFocus === 'string' && analysis.coachingFocus.trim()) {
+                const focus = document.createElement('p');
+                const label = document.createElement('strong');
+                label.textContent = 'Next practice focus: ';
+                focus.append(label, document.createTextNode(analysis.coachingFocus));
+                container.appendChild(focus);
+            }
         }
 
         function closePerformanceSummary() {
